@@ -32,31 +32,7 @@ jobs:
           choco install chromium -y --no-progress
 
       # -----------------------------------------------------------
-      # خطوة 3: تثبيت شبكة Tuxler VPN الحماية والتخطي
-      # -----------------------------------------------------------
-      - name: Install Tuxler VPN
-        shell: pwsh
-        run: |
-          Write-Host "🔒 Downloading Tuxler VPN (Bypassing Cloudflare)..."
-          $tuxlerUrl = "https://www.tuxler.com/downloads/tuxler-setup.exe"
-          $userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-          
-          try {
-              # محاولة التحميل بالهوية المحدثة لتجنب حظر الخادم
-              Invoke-WebRequest -Uri $tuxlerUrl -UserAgent $userAgent -OutFile "tuxler-setup.exe" -ErrorAction Stop
-              Write-Host "✅ Downloaded successfully from official source."
-          } catch {
-              Write-Host "⚠️ Official source restricted. Fetching from optimized mirror..."
-              $mirrorUrl = "https://github.com/it9g/tuxler-mirror/releases/download/v1.0/tuxler-setup.exe"
-              Invoke-WebRequest -Uri $mirrorUrl -OutFile "tuxler-setup.exe"
-          }
-
-          Write-Host "📦 Launching Silent Installation..."
-          Start-Process -FilePath "tuxler-setup.exe" -Args "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART" -Wait
-          Write-Host "✅ Tuxler VPN is ready."
-
-      # -----------------------------------------------------------
-      # خطوة 4: إعداد وتفعيل الوصول عن بعد (CRD)
+      # خطوة 3: إعداد وتفعيل الوصول عن بعد (CRD)
       # -----------------------------------------------------------
       - name: Configure Chrome Remote Desktop
         shell: pwsh
@@ -76,7 +52,7 @@ jobs:
           & $exePath --code="$env:CRD_CODE" --redirect-url="https://remotedesktop.google.com/_/oauthredirect" --name="$UniqueName" --pin=$env:CRD_PIN
 
       # -----------------------------------------------------------
-      # خطوة 5: استمرار تشغيل الحاوية / البيئة الافتراضية
+      # خطوة 4: استمرار تشغيل الحاوية / البيئة الافتراضية
       # -----------------------------------------------------------
       - name: Keep Alive Session
         shell: pwsh
