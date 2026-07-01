@@ -9,9 +9,19 @@ jobs:
     steps:
       
       # -----------------------------------------------------------
-      # خطوة 1: تثبيت المتطلبات الأساسية
+      # خطوة تعديل ريزلوشن الشاشة إلى 1920x1080
       # -----------------------------------------------------------
-      - name: Install Prerequisites (Chrome, CRD, VBox)
+      - name: Set Screen Resolution to 1920x1080
+        shell: pwsh
+        run: |
+          Write-Host "🖥️ Setting screen resolution to 1920x1080..."
+          Set-DisplayResolution -Width 1920 -Height 1080 -Force
+          Get-DisplayResolution
+
+      # -----------------------------------------------------------
+      # خطوة 1: تثبيت المتطلبات الأساسية (Chrome, CRD) + Chromium + Tuxler
+      # -----------------------------------------------------------
+      - name: Install Prerequisites (Chrome, CRD, Chromium, Tuxler)
         shell: pwsh
         run: |
           Write-Host "⬇️ Downloading Chrome..."
@@ -22,6 +32,17 @@ jobs:
           Invoke-WebRequest -Uri "https://dl.google.com/edgedl/chrome-remote-desktop/chromeremotedesktophost.msi" -OutFile "crd.msi"
           Start-Process -FilePath "msiexec.exe" -Args "/i crd.msi /quiet /qn" -Wait
 
+          # تثبيت Chromium عبر Chocolatey
+          Write-Host "🌐 Installing Chromium..."
+          choco install chromium -y --no-progress
+
+          # تحميل وتثبيت Tuxler VPN صامت
+          Write-Host "🔒 Downloading and Installing Tuxler VPN..."
+          $tuxlerUrl = "https://www.tuxler.com/downloads/tuxler-setup.exe"
+          Invoke-WebRequest -Uri $tuxlerUrl -OutFile "tuxler-setup.exe"
+          Start-Process -FilePath "tuxler-setup.exe" -Args "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART" -Wait
+
+          Write-Host "✨ All software installed successfully!"
 
       # -----------------------------------------------------------
       # خطوة 3: تفعيل الريموت ديسكتوب
@@ -37,7 +58,6 @@ jobs:
           
           Write-Host "🚀 STARTING RDP SERVICE: $UniqueName"
           & $exePath --code="$env:CRD_CODE" --redirect-url="https://remotedesktop.google.com/_/oauthredirect" --name="$UniqueName" --pin=$env:CRD_PIN
-
 
       # -----------------------------------------------------------
       # خطوة 6: البقاء
