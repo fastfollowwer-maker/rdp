@@ -1,17 +1,17 @@
 name: Ultimate-1D-Counter-No Script
 
-on: 
+on:
   workflow_dispatch:
 
 jobs:
   build:
     runs-on: windows-2022
+    
     steps:
-      
       # -----------------------------------------------------------
-      # خطوة تعديل ريزلوشن الشاشة إلى 1920x1080
+      # خطوة 1: تهيئة البيئة وأبعاد الشاشة
       # -----------------------------------------------------------
-      - name: Set Screen Resolution to 1920x1080
+      - name: Configure Display Resolution
         shell: pwsh
         run: |
           Write-Host "🖥️ Setting screen resolution to 1920x1080..."
@@ -19,49 +19,68 @@ jobs:
           Get-DisplayResolution
 
       # -----------------------------------------------------------
-      # خطوة 1: تثبيت المتطلبات الأساسية
+      # خطوة 2: تثبيت المتصفحات والأدوات الأساسية
       # -----------------------------------------------------------
-      - name: Install Prerequisites (Chrome, CRD, Chromium, Tuxler)
+      - name: Install Google Chrome & Chromium
         shell: pwsh
         run: |
-          Write-Host "⬇️ Downloading Chrome..."
+          Write-Host "⬇️ Downloading Google Chrome..."
           Invoke-WebRequest -Uri "https://dl.google.com/chrome/install/latest/chrome_installer.exe" -OutFile "chrome_installer.exe"
           Start-Process -FilePath "chrome_installer.exe" -Args "/silent /install" -Wait
           
-          Write-Host "⬇️ Downloading CRD Host..."
-          Invoke-WebRequest -Uri "https://dl.google.com/edgedl/chrome-remote-desktop/chromeremotedesktophost.msi" -OutFile "crd.msi"
-          Start-Process -FilePath "msiexec.exe" -Args "/i crd.msi /quiet /qn" -Wait
-
-          # تثبيت Chromium عبر Chocolatey
-          Write-Host "🌐 Installing Chromium..."
+          Write-Host "🌐 Installing Chromium via Chocolatey..."
           choco install chromium -y --no-progress
 
-          # تثبيت Tuxler VPN عبر Chocolatey لتخطي حماية Cloudflare
-          Write-Host "🔒 Installing Tuxler VPN..."
-          choco install tuxler -y --no-progress --ignore-checksums
+      # -----------------------------------------------------------
+      # خطوة 3: تثبيت شبكة Tuxler VPN الحماية والتخطي
+      # -----------------------------------------------------------
+      - name: Install Tuxler VPN
+        shell: pwsh
+        run: |
+          Write-Host "🔒 Downloading Tuxler VPN (Bypassing Cloudflare)..."
+          $tuxlerUrl = "https://www.tuxler.com/downloads/tuxler-setup.exe"
+          $userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+          
+          try {
+              # محاولة التحميل بالهوية المحدثة لتجنب حظر الخادم
+              Invoke-WebRequest -Uri $tuxlerUrl -UserAgent $userAgent -OutFile "tuxler-setup.exe" -ErrorAction Stop
+              Write-Host "✅ Downloaded successfully from official source."
+          } catch {
+              Write-Host "⚠️ Official source restricted. Fetching from optimized mirror..."
+              $mirrorUrl = "https://github.com/it9g/tuxler-mirror/releases/download/v1.0/tuxler-setup.exe"
+              Invoke-WebRequest -Uri $mirrorUrl -OutFile "tuxler-setup.exe"
+          }
 
-          Write-Host "✨ All software installed successfully!"
+          Write-Host "📦 Launching Silent Installation..."
+          Start-Process -FilePath "tuxler-setup.exe" -Args "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART" -Wait
+          Write-Host "✅ Tuxler VPN is ready."
 
       # -----------------------------------------------------------
-      # خطوة 3: تفعيل الريموت ديسكتوب
+      # خطوة 4: إعداد وتفعيل الوصول عن بعد (CRD)
       # -----------------------------------------------------------
-      - name: Start Chrome Remote Desktop
+      - name: Configure Chrome Remote Desktop
         shell: pwsh
         env:
           CRD_CODE: ${{ secrets.CRD_CODE }}
           CRD_PIN: ${{ secrets.CRD_PIN }}
         run: |
+          Write-Host "⬇️ Installing Chrome Remote Desktop Host..."
+          Invoke-WebRequest -Uri "https://dl.google.com/edgedl/chrome-remote-desktop/chromeremotedesktophost.msi" -OutFile "crd.msi"
+          Start-Process -FilePath "msiexec.exe" -Args "/i crd.msi /quiet /qn" -Wait
+
+          # توليد اسم فريد للآلة بناءً على حساب اليوزر والـ Run ID لمنع تداخل الأسماء
+          $UniqueName = "${{ github.actor }}-Machine-${{ github.run_id }}"
           $exePath = "${Env:PROGRAMFILES(X86)}\Google\Chrome Remote Desktop\CurrentVersion\remoting_start_host.exe"
-          $UniqueName = "${{ github.actor }}-Machine-${{ env.DEVICE_NUM }}"
           
-          Write-Host "🚀 STARTING RDP SERVICE: $UniqueName"
+          Write-Host "🚀 Spawning RDP Host Service: $UniqueName"
           & $exePath --code="$env:CRD_CODE" --redirect-url="https://remotedesktop.google.com/_/oauthredirect" --name="$UniqueName" --pin=$env:CRD_PIN
 
       # -----------------------------------------------------------
-      # خطوة 6: البقاء
+      # خطوة 5: استمرار تشغيل الحاوية / البيئة الافتراضية
       # -----------------------------------------------------------
-      - name: Keep Alive
+      - name: Keep Alive Session
         shell: pwsh
         run: |
-          Write-Host "✅ Both VMs are running..."
+          Write-Host "🚀 Environment is fully initialized and operational."
+          Write-Host "⏳ Entering maintenance loop..."
           while ($true) { Start-Sleep -Seconds 300 }
