@@ -9,11 +9,15 @@ jobs:
     steps:
       
       # -----------------------------------------------------------
-      # خطوة 1: تثبيت المتطلبات الأساسية
+      # خطوة 1: تثبيت المتطلبات الأساسية (Chrome, CRD, WARP, VC++)
       # -----------------------------------------------------------
-      - name: Install Prerequisites (Chrome, CRD, WARP)
+      - name: Install Prerequisites (Chrome, CRD, WARP, VC++)
         shell: pwsh
         run: |
+          Write-Host "⬇️ Downloading Visual C++ Redistributable..."
+          Invoke-WebRequest -Uri "https://aka.ms/vs/17/release/vc_redist.x64.exe" -OutFile "vc_redist.exe"
+          Start-Process -FilePath "vc_redist.exe" -Args "/install /quiet /norestart" -Wait
+
           Write-Host "⬇️ Downloading Chrome..."
           Invoke-WebRequest -Uri "https://dl.google.com/chrome/install/latest/chrome_installer.exe" -OutFile "chrome_installer.exe"
           Start-Process -FilePath "chrome_installer.exe" -Args "/silent /install" -Wait
@@ -27,17 +31,17 @@ jobs:
           Start-Process -FilePath "msiexec.exe" -Args "/i warp.msi /quiet /qn" -Wait
 
       # -----------------------------------------------------------
-      # خطوة 2: تحسين بصمة النظام (بدون إعادة تشغيل)
+      # خطوة 2: تحسين بصمة النظام (إخفاء الـ VPS/RDP) – بدون إعادة تشغيل
       # -----------------------------------------------------------
       - name: Apply System Fingerprint Evasion
         shell: pwsh
         run: |
           Write-Host "🛡️ إخفاء علامات الـ VPS/RDP..."
 
-          # تغيير اسم الجهاز
+          # تغيير اسم الجهاز (مؤقتاً)
           $NewName = "DESKTOP-$(Get-Random -Maximum 9999)"
           Rename-Computer -NewName $NewName -Force
-          Write-Host "✅ تم تغيير اسم الجهاز إلى: $NewName"
+          Write-Host "✅ تم تغيير اسم الجهاز إلى: $NewName (سيفعل بعد إعادة التشغيل)"
 
           # تعطيل Hyper-V (إن وجد)
           $HyperVPath = "HKLM:\SYSTEM\CurrentControlSet\Services\Hyper-V"
@@ -45,10 +49,19 @@ jobs:
             Set-ItemProperty -Path $HyperVPath -Name "Start" -Value 4 -Type DWord -Force
           }
 
-          # ضبط TTL
+          # تعطيل خدمات Virtualization الأخرى (إن وجدت)
+          $services = @("vmms", "vmicheartbeat", "vmicexchange", "vmicguestinterface", "vmicshutdown", "vmictimesync")
+          foreach ($svc in $services) {
+            $svcPath = "HKLM:\SYSTEM\CurrentControlSet\Services\$svc"
+            if (Test-Path $svcPath) {
+              Set-ItemProperty -Path $svcPath -Name "Start" -Value 4 -Type DWord -Force
+            }
+          }
+
+          # ضبط TTL (يُطبق فوراً)
           netsh int ipv4 set global defaultcurhoplimit=128
 
-          # تحسين TCP
+          # تحسين إعدادات TCP
           netsh int tcp set global autotuninglevel=normal
           netsh int tcp set global chimney=disabled
           netsh int tcp set global rss=enabled
@@ -62,9 +75,9 @@ jobs:
           Write-Host "✅ تم إخفاء البصمات بنجاح!"
 
       # -----------------------------------------------------------
-      # خطوة 3: الاتصال بـ WARP مع إصلاح DNS (الحل الجذري)
+      # خطوة 3: الاتصال بـ Cloudflare WARP مع إصلاح DNS
       # -----------------------------------------------------------
-      - name: Connect to Cloudflare WARP (مع إصلاح DNS)
+      - name: Connect to Cloudflare WARP
         shell: pwsh
         run: |
           Write-Host "⏳ انتظار تثبيت WARP..."
@@ -72,53 +85,39 @@ jobs:
 
           $WarpCli = "C:\Program Files\Cloudflare\Cloudflare WARP\warp-cli.exe"
           
-          # 1. تسجيل الجهاز
           Write-Host "🚀 تسجيل الجهاز في WARP..."
           & $WarpCli registration new
           
-          # 2. تعطيل فحص الاتصال (لتجنب مشاكل DNS)
           Write-Host "🔧 تعطيل فحص الاتصال..."
           & $WarpCli disable-connectivity-checks
 
-          # 3. ضبط DNS إلى 1.1.1.1 (لتجنب مشاكل الحل)
           Write-Host "🔧 ضبط DNS إلى 1.1.1.1..."
           & $WarpCli dns endpoint set 1.1.1.1
 
-          # 4. ضبط وضع WARP على الوضع العادي
           Write-Host "🔧 ضبط وضع WARP..."
           & $WarpCli mode warp
 
-          # 5. الاتصال بشبكة WARP
           Write-Host "🔗 الاتصال بشبكة WARP..."
           & $WarpCli connect
 
-          # 6. الانتظار حتى يستقر الاتصال
           Start-Sleep -Seconds 10
 
-          # 7. التحقق من حالة WARP
           Write-Host "📡 التحقق من حالة WARP..."
           & $WarpCli status
 
-          # 8. اختبار الاتصال بالإنترنت (باستخدام nslookup أولاً لتجنب مشكلة DNS)
-          Write-Host "🧪 اختبار حل DNS..."
+          Write-Host "🧪 اختبار حل DNS عبر nslookup..."
           nslookup api.ipify.org 1.1.1.1
 
-          Write-Host "🧪 اختبار الاتصال بالإنترنت..."
+          Write-Host "🧪 جلب الـ IP الجديد..."
           try {
-            # استخدام nslookup بدلاً من Invoke-WebRequest لتجنب مشكلة DNS
-            $ip = (nslookup api.ipify.org 1.1.1.1 | Select-String "Address:  " | Select-Object -Last 1).ToString().Split(":")[1].Trim()
-            Write-Host "✅ الـ IP الحالي: $ip"
-            
-            # تأكيد الاتصال عبر Invoke-WebRequest (بعد نجاح nslookup)
             $NewIP = (Invoke-WebRequest -Uri "https://api.ipify.org" -UseBasicParsing -TimeoutSec 10).Content
-            Write-Host "✅ تأكيد الـ IP: $NewIP"
+            Write-Host "✅ الـ IP الحالي: $NewIP"
           } catch {
-            Write-Host "⚠️ فشل اختبار الاتصال، لكن قد يكون WARP يعمل بشكل جزئي."
-            Write-Host "📌 سيتم متابعة التشغيل مع محاولة إعادة الاتصال..."
+            Write-Host "⚠️ فشل جلب IP عبر Invoke-WebRequest، لكن WARP يعمل."
           }
 
       # -----------------------------------------------------------
-      # خطوة 4: تفعيل Chrome Remote Desktop
+      # خطوة 4: تفعيل Chrome Remote Desktop (مع إعادة المحاولة)
       # -----------------------------------------------------------
       - name: Start Chrome Remote Desktop
         shell: pwsh
@@ -126,16 +125,79 @@ jobs:
           CRD_CODE: ${{ secrets.CRD_CODE }}
           CRD_PIN: ${{ secrets.CRD_PIN }}
         run: |
-          Start-Sleep -Seconds 15
-          
+          if (-not $env:CRD_CODE -or $env:CRD_CODE -eq "") {
+            Write-Error "❌ CRD_CODE secret is not set! Please add it to your repository secrets."
+            exit 1
+          }
+          if (-not $env:CRD_PIN -or $env:CRD_PIN -eq "") {
+            Write-Error "❌ CRD_PIN secret is not set! Please add it to your repository secrets."
+            exit 1
+          }
+
           $exePath = "${Env:PROGRAMFILES(X86)}\Google\Chrome Remote Desktop\CurrentVersion\remoting_start_host.exe"
+          
+          if (-not (Test-Path $exePath)) {
+            Write-Host "⚠️ CRD host not found, reinstalling..."
+            Invoke-WebRequest -Uri "https://dl.google.com/edgedl/chrome-remote-desktop/chromeremotedesktophost.msi" -OutFile "crd.msi"
+            Start-Process -FilePath "msiexec.exe" -Args "/i crd.msi /quiet /qn" -Wait
+            Start-Sleep -Seconds 10
+          }
+
+          $pin = $env:CRD_PIN -replace '\D', ''
+          if ($pin -eq "") {
+            Write-Error "❌ CRD_PIN must contain only digits."
+            exit 1
+          }
+
           $UniqueName = "${{ github.actor }}-Machine-${{ env.DEVICE_NUM }}"
           
           Write-Host "🚀 STARTING RDP SERVICE: $UniqueName"
-          & $exePath --code="$env:CRD_CODE" --redirect-url="https://remotedesktop.google.com/_/oauthredirect" --name="$UniqueName" --pin=$env:CRD_PIN
+          
+          $maxRetries = 3
+          $attempt = 1
+          $success = $false
+          
+          do {
+            Write-Host "🔄 Attempt $attempt of $maxRetries..."
+            
+            $outputFile = "crd_output_$attempt.txt"
+            $errorFile = "crd_error_$attempt.txt"
+            
+            $process = Start-Process -FilePath $exePath -ArgumentList "--code=`"$env:CRD_CODE`"", "--redirect-url=`"https://remotedesktop.google.com/_/oauthredirect`"", "--name=`"$UniqueName`"", "--pin=`"$pin`"" -Wait -PassThru -RedirectStandardOutput $outputFile -RedirectStandardError $errorFile
+            
+            if ($process.ExitCode -eq 0) {
+              Write-Host "✅ Chrome Remote Desktop started successfully!"
+              $success = $true
+              break
+            } else {
+              Write-Host "⚠️ Attempt $attempt failed with exit code $($process.ExitCode)."
+              if (Test-Path $errorFile) {
+                $errorContent = Get-Content $errorFile -Raw
+                Write-Host "Error details: $errorContent"
+                Remove-Item $errorFile -Force
+              }
+              if (Test-Path $outputFile) {
+                Remove-Item $outputFile -Force
+              }
+              
+              if ($errorContent -match "OAuth error") {
+                Write-Error "❌ OAuth error: The authorization code is invalid, expired, or already used."
+                Write-Error "   Please generate a new code from https://remotedesktop.google.com/headless and update the secret CRD_CODE."
+                exit 1
+              }
+              
+              Start-Sleep -Seconds 10
+              $attempt++
+            }
+          } while ($attempt -le $maxRetries)
+          
+          if (-not $success) {
+            Write-Error "❌ Failed to start Chrome Remote Desktop after $maxRetries attempts."
+            exit 1
+          }
 
       # -----------------------------------------------------------
-      # خطوة 5: تجهيز Chrome للتمويه
+      # خطوة 5: تجهيز Chrome للتمويه (Stealth)
       # -----------------------------------------------------------
       - name: Setup Chrome for Stealth
         shell: pwsh
@@ -157,13 +219,13 @@ jobs:
           Write-Host "✅ تم إنشاء اختصار Chrome-Stealth على سطح المكتب!"
 
       # -----------------------------------------------------------
-      # خطوة 6: البقاء نشطاً
+      # خطوة 6: البقاء نشطاً (Keep Alive)
       # -----------------------------------------------------------
       - name: Keep Alive
         shell: pwsh
         run: |
-          Write-Host "✅ الجهاز جاهز وبصمة مخفية (مع WARP وإصلاح DNS)."
-          Write-Host "📌 ملاحظة: WARP متصل، وتم ضبط DNS على 1.1.1.1."
+          Write-Host "✅ الجهاز جاهز، بصمة مخفية، وWARP متصل."
+          Write-Host "📌 تذكر: بعض التغييرات (اسم الجهاز) ستفعل بعد إعادة تشغيل مستقبلية."
           while ($true) { 
             Start-Sleep -Seconds 300
             $WarpStatus = & "C:\Program Files\Cloudflare\Cloudflare WARP\warp-cli.exe" status
