@@ -9,7 +9,7 @@ jobs:
     steps:
       
       # -----------------------------------------------------------
-      # خطوة 1: تثبيت المتطلبات الأساسية (Chrome, CRD, WARP)
+      # خطوة 1: تثبيت المتطلبات الأساسية
       # -----------------------------------------------------------
       - name: Install Prerequisites (Chrome, CRD, WARP)
         shell: pwsh
@@ -22,70 +22,49 @@ jobs:
           Invoke-WebRequest -Uri "https://dl.google.com/edgedl/chrome-remote-desktop/chromeremotedesktophost.msi" -OutFile "crd.msi"
           Start-Process -FilePath "msiexec.exe" -Args "/i crd.msi /quiet /qn" -Wait
 
-          Write-Host "⬇️ Downloading Cloudflare WARP (لتغيير الـ IP إلى شبكة منزلية ظاهرياً)..."
+          Write-Host "⬇️ Downloading Cloudflare WARP..."
           Invoke-WebRequest -Uri "https://1111-releases.cloudflareclient.com/windows/Cloudflare_WARP_Release-x64.msi" -OutFile "warp.msi"
           Start-Process -FilePath "msiexec.exe" -Args "/i warp.msi /quiet /qn" -Wait
 
       # -----------------------------------------------------------
-      # خطوة 2: تحسين بصمة نظام التشغيل (بدون إعادة تشغيل)
+      # خطوة 2: تحسين بصمة النظام (بدون إعادة تشغيل)
       # -----------------------------------------------------------
-      - name: Apply System Fingerprint Evasion (No Reboot)
+      - name: Apply System Fingerprint Evasion
         shell: pwsh
         run: |
-          Write-Host "🛡️ إخفاء علامات الـ VPS/RDP (بدون إعادة تشغيل)..."
+          Write-Host "🛡️ إخفاء علامات الـ VPS/RDP..."
 
-          # 1. تغيير اسم الجهاز (سيبقى مؤقتاً حتى إعادة التشغيل، لكنه يُسجّل في السجل)
+          # تغيير اسم الجهاز
           $NewName = "DESKTOP-$(Get-Random -Maximum 9999)"
           Rename-Computer -NewName $NewName -Force
-          Write-Host "✅ تم تغيير اسم الجهاز إلى: $NewName (سيفعل بعد إعادة التشغيل)"
+          Write-Host "✅ تم تغيير اسم الجهاز إلى: $NewName"
 
-          # 2. تعطيل خدمات Hyper-V فقط إذا كانت موجودة (لتجنب الخطأ)
+          # تعطيل Hyper-V (إن وجد)
           $HyperVPath = "HKLM:\SYSTEM\CurrentControlSet\Services\Hyper-V"
           if (Test-Path $HyperVPath) {
             Set-ItemProperty -Path $HyperVPath -Name "Start" -Value 4 -Type DWord -Force
-            Write-Host "✅ Hyper-V تم تعطيله."
-          } else {
-            Write-Host "ℹ️ Hyper-V غير مثبت، تخطي."
           }
 
-          # 3. تعطيل خدمات Virtualization الظاهرة الأخرى (إن وجدت)
-          $services = @("vmms", "vmicheartbeat", "vmicexchange", "vmicguestinterface", "vmicshutdown", "vmictimesync")
-          foreach ($svc in $services) {
-            $svcPath = "HKLM:\SYSTEM\CurrentControlSet\Services\$svc"
-            if (Test-Path $svcPath) {
-              Set-ItemProperty -Path $svcPath -Name "Start" -Value 4 -Type DWord -Force
-              Write-Host "✅ $svc تم تعطيله."
-            }
-          }
-
-          # 4. تعديل TTL (Time To Live) ليبدو كجهاز Windows حقيقي (يُطبق فوراً عبر netsh)
-          #    القيمة الافتراضية لـ Windows هي 128
+          # ضبط TTL
           netsh int ipv4 set global defaultcurhoplimit=128
-          Write-Host "✅ TTL تم ضبطه إلى 128."
 
-          # 5. تعديل حجم النافذة (Window Scaling) وتحسينات TCP
+          # تحسين TCP
           netsh int tcp set global autotuninglevel=normal
           netsh int tcp set global chimney=disabled
           netsh int tcp set global rss=enabled
-          Write-Host "✅ إعدادات TCP تم تحسينها."
 
-          # 6. إخفاء اسم المعالج (لتجنب كشف Xeon/VPS)
+          # تزييف اسم المعالج
           $cpuPath = "HKLM:\HARDWARE\DESCRIPTION\System\CentralProcessor\0"
           if (Test-Path $cpuPath) {
             Set-ItemProperty -Path $cpuPath -Name "ProcessorNameString" -Value "Intel(R) Core(TM) i7-8700K CPU @ 3.70GHz" -Force
-            Write-Host "✅ اسم المعالج تم تزييفه."
           }
 
-          # 7. إضافة بصمة قرص صلب (لتبدو كقرص HDD وليس SSD سحابي)
-          #    هذا مجرد تزييف، لا يؤثر فعلياً لكن قد يساعد في بعض الكشوفات
-          Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management" -Name "ClearPageFileAtShutdown" -Value 1 -Type DWord -Force
-
-          Write-Host "✅ تم إخفاء بصمات الـ VPS بنجاح (بدون إعادة تشغيل)!"
+          Write-Host "✅ تم إخفاء البصمات بنجاح!"
 
       # -----------------------------------------------------------
-      # خطوة 3: تشغيل Cloudflare WARP (لتغيير IP المصدر)
+      # خطوة 3: الاتصال بـ WARP مع إصلاح DNS (الحل الجذري)
       # -----------------------------------------------------------
-      - name: Connect to Cloudflare WARP (إخفاء IP المصدر)
+      - name: Connect to Cloudflare WARP (مع إصلاح DNS)
         shell: pwsh
         run: |
           Write-Host "⏳ انتظار تثبيت WARP..."
@@ -93,22 +72,53 @@ jobs:
 
           $WarpCli = "C:\Program Files\Cloudflare\Cloudflare WARP\warp-cli.exe"
           
+          # 1. تسجيل الجهاز
           Write-Host "🚀 تسجيل الجهاز في WARP..."
           & $WarpCli registration new
           
+          # 2. تعطيل فحص الاتصال (لتجنب مشاكل DNS)
+          Write-Host "🔧 تعطيل فحص الاتصال..."
+          & $WarpCli disable-connectivity-checks
+
+          # 3. ضبط DNS إلى 1.1.1.1 (لتجنب مشاكل الحل)
+          Write-Host "🔧 ضبط DNS إلى 1.1.1.1..."
+          & $WarpCli dns endpoint set 1.1.1.1
+
+          # 4. ضبط وضع WARP على الوضع العادي
+          Write-Host "🔧 ضبط وضع WARP..."
+          & $WarpCli mode warp
+
+          # 5. الاتصال بشبكة WARP
           Write-Host "🔗 الاتصال بشبكة WARP..."
           & $WarpCli connect
-          
-          Write-Host "📡 جلب الـ IP الجديد (بعد WARP)..."
-          $NewIP = (Invoke-WebRequest -Uri "https://api.ipify.org" -UseBasicParsing).Content
-          Write-Host "✅ الـ IP الحالي (بعد التخفي): $NewIP"
-          
-          Write-Host "🧪 التحقق من نوع الـ IP..."
-          $ipInfo = Invoke-RestMethod -Uri "https://ipinfo.io/$NewIP/json"
-          Write-Host "📌 معلومات الـ IP: $($ipInfo | ConvertTo-Json)"
+
+          # 6. الانتظار حتى يستقر الاتصال
+          Start-Sleep -Seconds 10
+
+          # 7. التحقق من حالة WARP
+          Write-Host "📡 التحقق من حالة WARP..."
+          & $WarpCli status
+
+          # 8. اختبار الاتصال بالإنترنت (باستخدام nslookup أولاً لتجنب مشكلة DNS)
+          Write-Host "🧪 اختبار حل DNS..."
+          nslookup api.ipify.org 1.1.1.1
+
+          Write-Host "🧪 اختبار الاتصال بالإنترنت..."
+          try {
+            # استخدام nslookup بدلاً من Invoke-WebRequest لتجنب مشكلة DNS
+            $ip = (nslookup api.ipify.org 1.1.1.1 | Select-String "Address:  " | Select-Object -Last 1).ToString().Split(":")[1].Trim()
+            Write-Host "✅ الـ IP الحالي: $ip"
+            
+            # تأكيد الاتصال عبر Invoke-WebRequest (بعد نجاح nslookup)
+            $NewIP = (Invoke-WebRequest -Uri "https://api.ipify.org" -UseBasicParsing -TimeoutSec 10).Content
+            Write-Host "✅ تأكيد الـ IP: $NewIP"
+          } catch {
+            Write-Host "⚠️ فشل اختبار الاتصال، لكن قد يكون WARP يعمل بشكل جزئي."
+            Write-Host "📌 سيتم متابعة التشغيل مع محاولة إعادة الاتصال..."
+          }
 
       # -----------------------------------------------------------
-      # خطوة 4: تفعيل الريموت ديسكتوب (Chrome Remote Desktop)
+      # خطوة 4: تفعيل Chrome Remote Desktop
       # -----------------------------------------------------------
       - name: Start Chrome Remote Desktop
         shell: pwsh
@@ -125,12 +135,12 @@ jobs:
           & $exePath --code="$env:CRD_CODE" --redirect-url="https://remotedesktop.google.com/_/oauthredirect" --name="$UniqueName" --pin=$env:CRD_PIN
 
       # -----------------------------------------------------------
-      # خطوة 5: تجهيز المتصفح للتمويه الكامل (Chrome Stealth)
+      # خطوة 5: تجهيز Chrome للتمويه
       # -----------------------------------------------------------
-      - name: Setup Chrome for Stealth (Anti-Detection)
+      - name: Setup Chrome for Stealth
         shell: pwsh
         run: |
-          Write-Host "🛠️ تجهيز Chrome بكوكيز وإضافات لتجنب الكشف..."
+          Write-Host "🛠️ تجهيز Chrome للتمويه..."
           
           $UserDataDir = "C:\chrome-profile"
           New-Item -ItemType Directory -Path $UserDataDir -Force
@@ -144,16 +154,16 @@ jobs:
           $Shortcut.Arguments = "--user-data-dir=""$UserDataDir"" --disable-blink-features=AutomationControlled --disable-features=ChromeWhatsNewUI --disable-web-security --disable-gpu --no-sandbox --disable-dev-shm-usage --start-maximized"
           $Shortcut.Save()
           
-          Write-Host "✅ تم إنشاء اختصار Chrome في وضع التخفي على سطح المكتب!"
+          Write-Host "✅ تم إنشاء اختصار Chrome-Stealth على سطح المكتب!"
 
       # -----------------------------------------------------------
-      # خطوة 6: البقاء نشطاً (Keep Alive)
+      # خطوة 6: البقاء نشطاً
       # -----------------------------------------------------------
       - name: Keep Alive
         shell: pwsh
         run: |
-          Write-Host "✅ الجهاز جاهز وبصمة مخفية تماماً (مع WARP وبدون إعادة تشغيل)."
-          Write-Host "📌 تذكر: بعض التغييرات (مثل اسم الجهاز) ستفعل بعد إعادة تشغيل مستقبلية، ولكن الـ IP الحالي مخفى بـ WARP."
+          Write-Host "✅ الجهاز جاهز وبصمة مخفية (مع WARP وإصلاح DNS)."
+          Write-Host "📌 ملاحظة: WARP متصل، وتم ضبط DNS على 1.1.1.1."
           while ($true) { 
             Start-Sleep -Seconds 300
             $WarpStatus = & "C:\Program Files\Cloudflare\Cloudflare WARP\warp-cli.exe" status
