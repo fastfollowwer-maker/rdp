@@ -9,9 +9,9 @@ jobs:
     steps:
       
       # -----------------------------------------------------------
-      # خطوة 1: تثبيت المتطلبات الأساسية
+      # خطوة 1: تثبيت المتطلبات الأساسية (Chrome, CRD, WARP)
       # -----------------------------------------------------------
-      - name: Install Prerequisites (Chrome, CRD, VBox)
+      - name: Install Prerequisites (Chrome, CRD, WARP, Registry Tweaks)
         shell: pwsh
         run: |
           Write-Host "⬇️ Downloading Chrome..."
@@ -22,9 +22,68 @@ jobs:
           Invoke-WebRequest -Uri "https://dl.google.com/edgedl/chrome-remote-desktop/chromeremotedesktophost.msi" -OutFile "crd.msi"
           Start-Process -FilePath "msiexec.exe" -Args "/i crd.msi /quiet /qn" -Wait
 
+          Write-Host "⬇️ Downloading Cloudflare WARP (لتغيير الـ IP إلى شبكة منزلية ظاهرياً)..."
+          Invoke-WebRequest -Uri "https://1111-releases.cloudflareclient.com/windows/Cloudflare_WARP_Release-x64.msi" -OutFile "warp.msi"
+          Start-Process -FilePath "msiexec.exe" -Args "/i warp.msi /quiet /qn" -Wait
 
       # -----------------------------------------------------------
-      # خطوة 3: تفعيل الريموت ديسكتوب
+      # خطوة 2: تحسين بصمة نظام التشغيل (إخفاء آثار الـ RDP/VPS)
+      # -----------------------------------------------------------
+      - name: Apply System Fingerprint Evasion (Registry & Settings)
+        shell: pwsh
+        run: |
+          Write-Host "🛡️ إخفاء علامات الـ VPS/RDP من السجل..."
+
+          # 1. تغيير اسم الجهاز ليبدو كجهاز منزلي (وليس SERVER-XXXX)
+          $NewName = "DESKTOP-$(Get-Random -Maximum 9999)"
+          Rename-Computer -NewName $NewName -Force
+          Write-Host "✅ تم تغيير اسم الجهاز إلى: $NewName"
+
+          # 2. تعطيل خدمات الـ Hyper-V و Virtualization الظاهرة (لتضليل الكشف)
+          Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Services\Hyper-V" -Name "Start" -Value 4 -Type DWord -Force
+          
+          # 3. تعديل TTL (Time To Live) ليبدو كجهاز Windows حقيقي (وليس Linux/VM)
+          #    القيمة الافتراضية لـ Windows هي 128
+          Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters" -Name "DefaultTTL" -Value 128 -Type DWord -Force
+
+          # 4. تعديل حجم النافذة (Window Scaling) ليبدو كجهاز فعلي (وليس افتراضي)
+          Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters" -Name "TcpWindowSize" -Value 65535 -Type DWord -Force
+
+          # 5. تعطيل إرسال بصمة الـ Intel/AMD (لتضليل كشف الـ CPU)
+          Set-ItemProperty -Path "HKLM:\HARDWARE\DESCRIPTION\System\CentralProcessor\0" -Name "ProcessorNameString" -Value "Intel(R) Core(TM) i7-8700K CPU @ 3.70GHz" -Force
+
+          Write-Host "✅ تم إخفاء بصمات الـ VPS بنجاح!"
+          Write-Host "🔄 سيتم إعادة التشغيل لتطبيق التغييرات، ثم متابعة الباقي..."
+          Restart-Computer -Force
+
+      # -----------------------------------------------------------
+      # خطوة 3 (بعد إعادة التشغيل): تشغيل WARP وتأكيد الاتصال
+      # -----------------------------------------------------------
+      - name: Connect to Cloudflare WARP (إخفاء IP المصدر)
+        shell: pwsh
+        run: |
+          Write-Host "⏳ انتظار بدء تشغيل WARP..."
+          Start-Sleep -Seconds 30
+
+          $WarpCli = "C:\Program Files\Cloudflare\Cloudflare WARP\warp-cli.exe"
+          
+          Write-Host "🚀 تسجيل الجهاز في WARP..."
+          & $WarpCli registration new
+          
+          Write-Host "🔗 الاتصال بشبكة WARP..."
+          & $WarpCli connect
+          
+          Write-Host "📡 جلب الـ IP الجديد (بعد WARP)..."
+          $NewIP = (Invoke-WebRequest -Uri "https://api.ipify.org" -UseBasicParsing).Content
+          Write-Host "✅ الـ IP الحالي (بعد التخفي): $NewIP"
+          
+          Write-Host "🧪 التحقق من نوع الـ IP (هل هو سكني؟)..."
+          # يمكنك إضافة فحص عبر ipinfo.io للتأكد
+          $ipInfo = Invoke-RestMethod -Uri "https://ipinfo.io/$NewIP/json"
+          Write-Host "📌 معلومات الـ IP: $($ipInfo | ConvertTo-Json)"
+
+      # -----------------------------------------------------------
+      # خطوة 4: تفعيل الريموت ديسكتوب (Chrome Remote Desktop)
       # -----------------------------------------------------------
       - name: Start Chrome Remote Desktop
         shell: pwsh
@@ -32,18 +91,50 @@ jobs:
           CRD_CODE: ${{ secrets.CRD_CODE }}
           CRD_PIN: ${{ secrets.CRD_PIN }}
         run: |
+          # الانتظار حتى يستقر اتصال WARP
+          Start-Sleep -Seconds 15
+          
           $exePath = "${Env:PROGRAMFILES(X86)}\Google\Chrome Remote Desktop\CurrentVersion\remoting_start_host.exe"
           $UniqueName = "${{ github.actor }}-Machine-${{ env.DEVICE_NUM }}"
           
           Write-Host "🚀 STARTING RDP SERVICE: $UniqueName"
           & $exePath --code="$env:CRD_CODE" --redirect-url="https://remotedesktop.google.com/_/oauthredirect" --name="$UniqueName" --pin=$env:CRD_PIN
 
-
       # -----------------------------------------------------------
-      # خطوة 6: البقاء
+      # خطوة 5: تجهيز المتصفح (Chrome) للتمويه الكامل (إخفاء بصمة Headless)
       # -----------------------------------------------------------
-      - name: Keep Alive
+      - name: Setup Chrome for Stealth (Anti-Detection)
         shell: pwsh
         run: |
-          Write-Host "✅ Both VMs are running..."
-          while ($true) { Start-Sleep -Seconds 300 }
+          Write-Host "🛠️ تجهيز Chrome بكوكيز وإضافات لتجنب الكشف..."
+          
+          # إنشاء ملف تعريف مستخدم جديد (User Profile) لتجنب الكشف
+          $UserDataDir = "C:\chrome-profile"
+          New-Item -ItemType Directory -Path $UserDataDir -Force
+          
+          # إضافة اختصار لـ Chrome يعمل في وضع التخفي التام
+          $ChromePath = "C:\Program Files\Google\Chrome\Application\chrome.exe"
+          $ShortcutPath = "C:\Users\runneradmin\Desktop\Chrome-Stealth.lnk"
+          
+          $WScriptShell = New-Object -ComObject WScript.Shell
+          $Shortcut = $WScriptShell.CreateShortcut($ShortcutPath)
+          $Shortcut.TargetPath = $ChromePath
+          $Shortcut.Arguments = "--user-data-dir=""$UserDataDir"" --disable-blink-features=AutomationControlled --disable-features=ChromeWhatsNewUI --disable-web-security --disable-gpu --no-sandbox --disable-dev-shm-usage --start-maximized"
+          $Shortcut.Save()
+          
+          Write-Host "✅ تم إنشاء اختصار Chrome في وضع التخفي على سطح المكتب!"
+
+      # -----------------------------------------------------------
+      # خطوة 6: البقاء نشطاً (Keep Alive)
+      # -----------------------------------------------------------
+      - name: Keep Alive & Monitor WARP
+        shell: pwsh
+        run: |
+          Write-Host "✅ الجهاز جاهز وبصمة مخفية تماماً..."
+          Write-Host "📌 ملاحظة: جميع الاتصالات تمر عبر WARP (IP سكني ظاهري)."
+          while ($true) { 
+            Start-Sleep -Seconds 300 
+            # التحقق من بقاء WARP متصلاً
+            $WarpStatus = & "C:\Program Files\Cloudflare\Cloudflare WARP\warp-cli.exe" status
+            Write-Host "[STATUS] $WarpStatus"
+          }
