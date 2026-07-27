@@ -11,7 +11,7 @@ jobs:
       # -----------------------------------------------------------
       # خطوة 1: تثبيت المتطلبات الأساسية (Chrome, CRD, WARP)
       # -----------------------------------------------------------
-      - name: Install Prerequisites (Chrome, CRD, WARP, Registry Tweaks)
+      - name: Install Prerequisites (Chrome, CRD, WARP)
         shell: pwsh
         run: |
           Write-Host "⬇️ Downloading Chrome..."
@@ -27,42 +27,68 @@ jobs:
           Start-Process -FilePath "msiexec.exe" -Args "/i warp.msi /quiet /qn" -Wait
 
       # -----------------------------------------------------------
-      # خطوة 2: تحسين بصمة نظام التشغيل (إخفاء آثار الـ RDP/VPS)
+      # خطوة 2: تحسين بصمة نظام التشغيل (بدون إعادة تشغيل)
       # -----------------------------------------------------------
-      - name: Apply System Fingerprint Evasion (Registry & Settings)
+      - name: Apply System Fingerprint Evasion (No Reboot)
         shell: pwsh
         run: |
-          Write-Host "🛡️ إخفاء علامات الـ VPS/RDP من السجل..."
+          Write-Host "🛡️ إخفاء علامات الـ VPS/RDP (بدون إعادة تشغيل)..."
 
-          # 1. تغيير اسم الجهاز ليبدو كجهاز منزلي (وليس SERVER-XXXX)
+          # 1. تغيير اسم الجهاز (سيبقى مؤقتاً حتى إعادة التشغيل، لكنه يُسجّل في السجل)
           $NewName = "DESKTOP-$(Get-Random -Maximum 9999)"
           Rename-Computer -NewName $NewName -Force
-          Write-Host "✅ تم تغيير اسم الجهاز إلى: $NewName"
+          Write-Host "✅ تم تغيير اسم الجهاز إلى: $NewName (سيفعل بعد إعادة التشغيل)"
 
-          # 2. تعطيل خدمات الـ Hyper-V و Virtualization الظاهرة (لتضليل الكشف)
-          Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Services\Hyper-V" -Name "Start" -Value 4 -Type DWord -Force
-          
-          # 3. تعديل TTL (Time To Live) ليبدو كجهاز Windows حقيقي (وليس Linux/VM)
+          # 2. تعطيل خدمات Hyper-V فقط إذا كانت موجودة (لتجنب الخطأ)
+          $HyperVPath = "HKLM:\SYSTEM\CurrentControlSet\Services\Hyper-V"
+          if (Test-Path $HyperVPath) {
+            Set-ItemProperty -Path $HyperVPath -Name "Start" -Value 4 -Type DWord -Force
+            Write-Host "✅ Hyper-V تم تعطيله."
+          } else {
+            Write-Host "ℹ️ Hyper-V غير مثبت، تخطي."
+          }
+
+          # 3. تعطيل خدمات Virtualization الظاهرة الأخرى (إن وجدت)
+          $services = @("vmms", "vmicheartbeat", "vmicexchange", "vmicguestinterface", "vmicshutdown", "vmictimesync")
+          foreach ($svc in $services) {
+            $svcPath = "HKLM:\SYSTEM\CurrentControlSet\Services\$svc"
+            if (Test-Path $svcPath) {
+              Set-ItemProperty -Path $svcPath -Name "Start" -Value 4 -Type DWord -Force
+              Write-Host "✅ $svc تم تعطيله."
+            }
+          }
+
+          # 4. تعديل TTL (Time To Live) ليبدو كجهاز Windows حقيقي (يُطبق فوراً عبر netsh)
           #    القيمة الافتراضية لـ Windows هي 128
-          Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters" -Name "DefaultTTL" -Value 128 -Type DWord -Force
+          netsh int ipv4 set global defaultcurhoplimit=128
+          Write-Host "✅ TTL تم ضبطه إلى 128."
 
-          # 4. تعديل حجم النافذة (Window Scaling) ليبدو كجهاز فعلي (وليس افتراضي)
-          Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters" -Name "TcpWindowSize" -Value 65535 -Type DWord -Force
+          # 5. تعديل حجم النافذة (Window Scaling) وتحسينات TCP
+          netsh int tcp set global autotuninglevel=normal
+          netsh int tcp set global chimney=disabled
+          netsh int tcp set global rss=enabled
+          Write-Host "✅ إعدادات TCP تم تحسينها."
 
-          # 5. تعطيل إرسال بصمة الـ Intel/AMD (لتضليل كشف الـ CPU)
-          Set-ItemProperty -Path "HKLM:\HARDWARE\DESCRIPTION\System\CentralProcessor\0" -Name "ProcessorNameString" -Value "Intel(R) Core(TM) i7-8700K CPU @ 3.70GHz" -Force
+          # 6. إخفاء اسم المعالج (لتجنب كشف Xeon/VPS)
+          $cpuPath = "HKLM:\HARDWARE\DESCRIPTION\System\CentralProcessor\0"
+          if (Test-Path $cpuPath) {
+            Set-ItemProperty -Path $cpuPath -Name "ProcessorNameString" -Value "Intel(R) Core(TM) i7-8700K CPU @ 3.70GHz" -Force
+            Write-Host "✅ اسم المعالج تم تزييفه."
+          }
 
-          Write-Host "✅ تم إخفاء بصمات الـ VPS بنجاح!"
-          Write-Host "🔄 سيتم إعادة التشغيل لتطبيق التغييرات، ثم متابعة الباقي..."
-          Restart-Computer -Force
+          # 7. إضافة بصمة قرص صلب (لتبدو كقرص HDD وليس SSD سحابي)
+          #    هذا مجرد تزييف، لا يؤثر فعلياً لكن قد يساعد في بعض الكشوفات
+          Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management" -Name "ClearPageFileAtShutdown" -Value 1 -Type DWord -Force
+
+          Write-Host "✅ تم إخفاء بصمات الـ VPS بنجاح (بدون إعادة تشغيل)!"
 
       # -----------------------------------------------------------
-      # خطوة 3 (بعد إعادة التشغيل): تشغيل WARP وتأكيد الاتصال
+      # خطوة 3: تشغيل Cloudflare WARP (لتغيير IP المصدر)
       # -----------------------------------------------------------
       - name: Connect to Cloudflare WARP (إخفاء IP المصدر)
         shell: pwsh
         run: |
-          Write-Host "⏳ انتظار بدء تشغيل WARP..."
+          Write-Host "⏳ انتظار تثبيت WARP..."
           Start-Sleep -Seconds 30
 
           $WarpCli = "C:\Program Files\Cloudflare\Cloudflare WARP\warp-cli.exe"
@@ -77,8 +103,7 @@ jobs:
           $NewIP = (Invoke-WebRequest -Uri "https://api.ipify.org" -UseBasicParsing).Content
           Write-Host "✅ الـ IP الحالي (بعد التخفي): $NewIP"
           
-          Write-Host "🧪 التحقق من نوع الـ IP (هل هو سكني؟)..."
-          # يمكنك إضافة فحص عبر ipinfo.io للتأكد
+          Write-Host "🧪 التحقق من نوع الـ IP..."
           $ipInfo = Invoke-RestMethod -Uri "https://ipinfo.io/$NewIP/json"
           Write-Host "📌 معلومات الـ IP: $($ipInfo | ConvertTo-Json)"
 
@@ -91,7 +116,6 @@ jobs:
           CRD_CODE: ${{ secrets.CRD_CODE }}
           CRD_PIN: ${{ secrets.CRD_PIN }}
         run: |
-          # الانتظار حتى يستقر اتصال WARP
           Start-Sleep -Seconds 15
           
           $exePath = "${Env:PROGRAMFILES(X86)}\Google\Chrome Remote Desktop\CurrentVersion\remoting_start_host.exe"
@@ -101,18 +125,16 @@ jobs:
           & $exePath --code="$env:CRD_CODE" --redirect-url="https://remotedesktop.google.com/_/oauthredirect" --name="$UniqueName" --pin=$env:CRD_PIN
 
       # -----------------------------------------------------------
-      # خطوة 5: تجهيز المتصفح (Chrome) للتمويه الكامل (إخفاء بصمة Headless)
+      # خطوة 5: تجهيز المتصفح للتمويه الكامل (Chrome Stealth)
       # -----------------------------------------------------------
       - name: Setup Chrome for Stealth (Anti-Detection)
         shell: pwsh
         run: |
           Write-Host "🛠️ تجهيز Chrome بكوكيز وإضافات لتجنب الكشف..."
           
-          # إنشاء ملف تعريف مستخدم جديد (User Profile) لتجنب الكشف
           $UserDataDir = "C:\chrome-profile"
           New-Item -ItemType Directory -Path $UserDataDir -Force
           
-          # إضافة اختصار لـ Chrome يعمل في وضع التخفي التام
           $ChromePath = "C:\Program Files\Google\Chrome\Application\chrome.exe"
           $ShortcutPath = "C:\Users\runneradmin\Desktop\Chrome-Stealth.lnk"
           
@@ -127,14 +149,13 @@ jobs:
       # -----------------------------------------------------------
       # خطوة 6: البقاء نشطاً (Keep Alive)
       # -----------------------------------------------------------
-      - name: Keep Alive & Monitor WARP
+      - name: Keep Alive
         shell: pwsh
         run: |
-          Write-Host "✅ الجهاز جاهز وبصمة مخفية تماماً..."
-          Write-Host "📌 ملاحظة: جميع الاتصالات تمر عبر WARP (IP سكني ظاهري)."
+          Write-Host "✅ الجهاز جاهز وبصمة مخفية تماماً (مع WARP وبدون إعادة تشغيل)."
+          Write-Host "📌 تذكر: بعض التغييرات (مثل اسم الجهاز) ستفعل بعد إعادة تشغيل مستقبلية، ولكن الـ IP الحالي مخفى بـ WARP."
           while ($true) { 
-            Start-Sleep -Seconds 300 
-            # التحقق من بقاء WARP متصلاً
+            Start-Sleep -Seconds 300
             $WarpStatus = & "C:\Program Files\Cloudflare\Cloudflare WARP\warp-cli.exe" status
             Write-Host "[STATUS] $WarpStatus"
           }
