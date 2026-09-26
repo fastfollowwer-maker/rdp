@@ -9,9 +9,9 @@ jobs:
     steps:
       
       # -----------------------------------------------------------
-      # خطوة 1: تثبيت المتطلبات الأساسية
+      # خطوة 1: تثبيت المتطلبات الأساسية وتعديل إعدادات النظام
       # -----------------------------------------------------------
-      - name: Install Prerequisites (Chrome, CRD, VBox)
+      - name: Install Prerequisites & Configure Network
         shell: pwsh
         run: |
           Write-Host "⬇️ Downloading Chrome..."
@@ -22,28 +22,30 @@ jobs:
           Invoke-WebRequest -Uri "https://dl.google.com/edgedl/chrome-remote-desktop/chromeremotedesktophost.msi" -OutFile "crd.msi"
           Start-Process -FilePath "msiexec.exe" -Args "/i crd.msi /quiet /qn" -Wait
 
+          # تعطيل أي إعدادات بروكسي قديمة في ويندوز لضمان الاتصال المباشر
+          Write-Host "🌐 Cleaning up Windows Proxy settings..."
+          Set-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Internet Settings' -Name ProxyEnable -Value 0
 
       # -----------------------------------------------------------
-      # خطوة 3: تفعيل الريموت ديسكتوب
+      # خطوة 2: تفعيل الريموت ديسكتوب
       # -----------------------------------------------------------
       - name: Start Chrome Remote Desktop
         shell: pwsh
         env:
-          CRD_CODE: ${{ secrets.CRD_CODE }}
-          CRD_PIN: ${{ secrets.CRD_PIN }}
+          CR_CODE: ${{ secrets.CRD_CODE }}
+          CR_PIN: ${{ secrets.CRD_PIN }}
         run: |
           $exePath = "${Env:PROGRAMFILES(X86)}\Google\Chrome Remote Desktop\CurrentVersion\remoting_start_host.exe"
-          $UniqueName = "${{ github.actor }}-Machine-${{ env.DEVICE_NUM }}"
+          $UniqueName = "${{ github.actor }}-Machine"
           
           Write-Host "🚀 STARTING RDP SERVICE: $UniqueName"
-          & $exePath --code="$env:CRD_CODE" --redirect-url="https://remotedesktop.google.com/_/oauthredirect" --name="$UniqueName" --pin=$env:CRD_PIN
-
+          & $exePath --code="$env:CR_CODE" --redirect-url="https://remotedesktop.google.com/_/oauthredirect" --name="$UniqueName" --pin=$env:CR_PIN
 
       # -----------------------------------------------------------
-      # خطوة 6: البقاء
+      # خطوة 3: البقاء
       # -----------------------------------------------------------
       - name: Keep Alive
         shell: pwsh
         run: |
-          Write-Host "✅ Both VMs are running..."
+          Write-Host "✅ VM is running smoothly..."
           while ($true) { Start-Sleep -Seconds 300 }
