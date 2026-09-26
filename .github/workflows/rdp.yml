@@ -9,9 +9,9 @@ jobs:
     steps:
       
       # -----------------------------------------------------------
-      # خطوة 1: تثبيت المتطلبات الأساسية وتعديل إعدادات النظام
+      # خطوة 1: تثبيت المتطلبات الأساسية (Chrome, CRD)
       # -----------------------------------------------------------
-      - name: Install Prerequisites & Configure Network
+      - name: Install Prerequisites
         shell: pwsh
         run: |
           Write-Host "⬇️ Downloading Chrome..."
@@ -22,27 +22,42 @@ jobs:
           Invoke-WebRequest -Uri "https://dl.google.com/edgedl/chrome-remote-desktop/chromeremotedesktophost.msi" -OutFile "crd.msi"
           Start-Process -FilePath "msiexec.exe" -Args "/i crd.msi /quiet /qn" -Wait
 
-          # تعطيل أي إعدادات بروكسي قديمة في ويندوز لضمان الاتصال المباشر
-          Write-Host "🌐 Cleaning up Windows Proxy settings..."
-          Set-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Internet Settings' -Name ProxyEnable -Value 0
+      # -----------------------------------------------------------
+      # خطوة 2: تثبيت وتشغيل Cloudflare WARP لتغيير الـ IP
+      # -----------------------------------------------------------
+      - name: Install and Connect Cloudflare WARP
+        shell: pwsh
+        run: |
+          Write-Host "⬇️ Downloading Cloudflare WARP..."
+          Invoke-WebRequest -Uri "https://cloudflarewarp.com/Cloudflare_WARP_Release-x64.msi" -OutFile "warp.msi"
+          Start-Process -FilePath "msiexec.exe" -Args "/i warp.msi /quiet /qn" -Wait
+          
+          Write-Host "⏳ Waiting for WARP service to initialize..."
+          Start-Sleep -Seconds 15
+          
+          Write-Host "🚀 Registering and Connecting WARP..."
+          & "C:\Program Files\Cloudflare\Cloudflare WARP\warp-cli.exe" --accept-tos register
+          & "C:\Program Files\Cloudflare\Cloudflare WARP\warp-cli.exe" --accept-tos connect
+          
+          Write-Host "✅ WARP Connected! Server IP is now masked."
 
       # -----------------------------------------------------------
-      # خطوة 2: تفعيل الريموت ديسكتوب
+      # خطوة 3: تفعيل الريموت ديسكتوب
       # -----------------------------------------------------------
       - name: Start Chrome Remote Desktop
         shell: pwsh
         env:
-          CR_CODE: ${{ secrets.CRD_CODE }}
-          CR_PIN: ${{ secrets.CRD_PIN }}
+          CRD_CODE: ${{ secrets.CRD_CODE }}
+          CRD_PIN: ${{ secrets.CRD_PIN }}
         run: |
           $exePath = "${Env:PROGRAMFILES(X86)}\Google\Chrome Remote Desktop\CurrentVersion\remoting_start_host.exe"
           $UniqueName = "${{ github.actor }}-Machine"
           
           Write-Host "🚀 STARTING RDP SERVICE: $UniqueName"
-          & $exePath --code="$env:CR_CODE" --redirect-url="https://remotedesktop.google.com/_/oauthredirect" --name="$UniqueName" --pin=$env:CR_PIN
+          & $exePath --code="$env:CRD_CODE" --redirect-url="https://remotedesktop.google.com/_/oauthredirect" --name="$UniqueName" --pin=$env:CRD_PIN
 
       # -----------------------------------------------------------
-      # خطوة 3: البقاء
+      # خطوة 4: البقاء
       # -----------------------------------------------------------
       - name: Keep Alive
         shell: pwsh
