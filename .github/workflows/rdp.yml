@@ -22,25 +22,36 @@ jobs:
           Invoke-WebRequest -Uri "https://dl.google.com/edgedl/chrome-remote-desktop/chromeremotedesktophost.msi" -OutFile "crd.msi"
           Start-Process -FilePath "msiexec.exe" -Args "/i crd.msi /quiet /qn" -Wait
 
-      # -----------------------------------------------------------
-      # خطوة 2: تثبيت وتشغيل Cloudflare WARP لتغيير الـ IP
+# -----------------------------------------------------------
+      # خطوة 2: تثبيت وتشغيل Cloudflare WARP باستخدام winget
       # -----------------------------------------------------------
       - name: Install and Connect Cloudflare WARP
         shell: pwsh
         run: |
-          Write-Host "⬇️ Downloading Cloudflare WARP..."
-          Invoke-WebRequest -Uri "https://cloudflarewarp.com/Cloudflare_WARP_Release-x64.msi" -OutFile "warp.msi"
-          Start-Process -FilePath "msiexec.exe" -Args "/i warp.msi /quiet /qn" -Wait
+          Write-Host "⬇️ Installing Cloudflare WARP via Winget..."
+          winget install --id Cloudflare.CloudflareWARP -e --silent --accept-package-agreements --accept-source-agreements
           
-          Write-Host "⏳ Waiting for WARP service to initialize..."
-          Start-Sleep -Seconds 15
+          Write-Host "⏳ Waiting for WARP CLI to be available..."
+          $warpPath = "C:\Program Files\Cloudflare\Cloudflare WARP\warp-cli.exe"
+          
+          # الانتظار حتى يتم تثبيت الملف بشكل كامل (بحد أقصى دقيقة)
+          for ($i=0; $i -lt 12; $i++) {
+              if (Test-Path $warpPath) {
+                  break
+              }
+              Start-Sleep -Seconds 5
+          }
+          
+          if (!(Test-Path $warpPath)) {
+              Write-Error "❌ WARP CLI path not found!"
+              exit 1
+          }
           
           Write-Host "🚀 Registering and Connecting WARP..."
-          & "C:\Program Files\Cloudflare\Cloudflare WARP\warp-cli.exe" --accept-tos register
-          & "C:\Program Files\Cloudflare\Cloudflare WARP\warp-cli.exe" --accept-tos connect
+          & $warpPath --accept-tos register
+          & $warpPath --accept-tos connect
           
-          Write-Host "✅ WARP Connected! Server IP is now masked."
-
+          Write-Host "✅ WARP Connected successfully!"
       # -----------------------------------------------------------
       # خطوة 3: تفعيل الريموت ديسكتوب
       # -----------------------------------------------------------
